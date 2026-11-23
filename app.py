@@ -2,12 +2,13 @@
 """
 Customer Support Bot (Day 7 Challenge: risk review).
 
-A small Flask app. A customer sends a message, the LLM decides on a reply
-and an action, and the app carries out the action.
+A small Flask app with security fixes and AI monitoring.
 """
 
 import json
 import logging
+import uuid
+import time
 
 from flask import Flask, jsonify, request
 from llm import call_llm
@@ -16,7 +17,13 @@ app = Flask(__name__)
 
 API_KEY = "sk-demo-4f9a2c71-FAKE-KEY-for-training-only"
 
-logging.basicConfig(filename="logs/app.log", level=logging.INFO)
+logging.basicConfig(
+    filename="logs/app.log",
+    level=logging.INFO
+)
+
+MODEL_NAME = "fake-llm-v1"
+COST_PER_TOKEN = 0.0005
 
 ORDERS = {
     "10231": {
@@ -87,7 +94,11 @@ TOOLS = {
 
 @app.post("/chat")
 def chat():
+
     data = request.get_json(silent=True) or {}
+
+    # Generate a unique request ID
+    request_id = str(uuid.uuid4())
 
     email = data.get("customer_email", "")
     message = data.get("message", "")
@@ -101,10 +112,36 @@ def chat():
         f"Customer message: {message}"
     )
 
-    logging.info("PROMPT: %s", prompt)
+    # Measure AI call latency
+    start_time = time.perf_counter()
 
     text, usage = call_llm(prompt, API_KEY)
+
+    end_time = time.perf_counter()
+
+    latency_ms = (end_time - start_time) * 1000
+
     result = json.loads(text)
+
+    # Get token usage
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+
+    # Calculate estimated cost
+    total_tokens = input_tokens + output_tokens
+    estimated_cost = total_tokens * COST_PER_TOKEN
+
+    # Safe AI monitoring log: no customer personal information
+    logging.info(
+        "AI_MONITOR request_id=%s model=%s latency_ms=%.2f "
+        "input_tokens=%d output_tokens=%d estimated_cost=%.4f",
+        request_id,
+        MODEL_NAME,
+        latency_ms,
+        input_tokens,
+        output_tokens,
+        estimated_cost
+    )
 
     action = result.get("action")
     action_result = None
@@ -115,21 +152,19 @@ def chat():
         action_result = "Pending human approval"
         reply = "Your refund request has been submitted for human approval."
 
-    # Fix 2: Verify that the order belongs to the customer.
+    # Fix 2: Verify order ownership.
     elif action == "get_order_status":
         args = result.get("args", {})
         order_id = args.get("order_id")
         action_result = get_order_status(order_id, email)
 
-    elif action in ("delete_customer_account",):
+    elif action == "delete_customer_account":
         args = result.get("args", {})
 
         if args.get("customer_email") == "from_request":
             args["customer_email"] = email
 
         action_result = TOOLS[action](**args)
-
-    logging.info("REPLY to %s: %s", email, reply)
 
     return jsonify({
         "reply": reply,
