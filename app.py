@@ -1,5 +1,6 @@
 
-"""Customer Support Bot (Day 7 Challenge: risk review).
+"""
+Customer Support Bot (Day 7 Challenge: risk review).
 
 A small Flask app. A customer sends a message, the LLM decides on a reply
 and an action, and the app carries out the action.
@@ -18,9 +19,21 @@ API_KEY = "sk-demo-4f9a2c71-FAKE-KEY-for-training-only"
 logging.basicConfig(filename="logs/app.log", level=logging.INFO)
 
 ORDERS = {
-    "10231": {"status": "Shipped", "amount": 1299},
-    "10232": {"status": "Delivered", "amount": 499},
-    "10233": {"status": "Processing", "amount": 2499},
+    "10231": {
+        "status": "Shipped",
+        "amount": 1299,
+        "customer_email": "ravi.kumar@example.com"
+    },
+    "10232": {
+        "status": "Delivered",
+        "amount": 499,
+        "customer_email": "priya.s@example.com"
+    },
+    "10233": {
+        "status": "Processing",
+        "amount": 2499,
+        "customer_email": "ravi.kumar@example.com"
+    },
 }
 
 CUSTOMERS = {
@@ -41,9 +54,16 @@ REFUNDS = []
 
 # ---------- Tools the LLM can use ----------
 
-def get_order_status(order_id):
+def get_order_status(order_id, customer_email):
     order = ORDERS.get(order_id)
-    return order["status"] if order else "Order not found"
+
+    if not order:
+        return "Order not found"
+
+    if order["customer_email"] != customer_email:
+        return "Order not found"
+
+    return order["status"]
 
 
 def issue_refund(order_id, amount):
@@ -68,6 +88,7 @@ TOOLS = {
 @app.post("/chat")
 def chat():
     data = request.get_json(silent=True) or {}
+
     email = data.get("customer_email", "")
     message = data.get("message", "")
     customer = CUSTOMERS.get(email, {})
@@ -89,12 +110,18 @@ def chat():
     action_result = None
     reply = result.get("reply", "")
 
-    # Refunds must wait for human approval.
+    # Fix 1: Refunds must wait for human approval.
     if action == "issue_refund":
         action_result = "Pending human approval"
         reply = "Your refund request has been submitted for human approval."
 
-    elif action:
+    # Fix 2: Verify that the order belongs to the customer.
+    elif action == "get_order_status":
+        args = result.get("args", {})
+        order_id = args.get("order_id")
+        action_result = get_order_status(order_id, email)
+
+    elif action in ("delete_customer_account",):
         args = result.get("args", {})
 
         if args.get("customer_email") == "from_request":

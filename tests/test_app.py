@@ -61,3 +61,16 @@ def test_refund_requires_human_approval(client):
     assert response.status_code == 200
     assert data["action_result"] == "Pending human approval"
     assert len(REFUNDS) == previous_count
+
+
+def test_customer_cannot_view_another_customers_order(client):
+    response = client.post(
+        "/chat",
+        json={
+            "customer_email": "priya.s@example.com",
+            "message": "Where is my order 10231?"
+        }
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["action_result"] == "Order not found"
